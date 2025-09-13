@@ -27,6 +27,11 @@ interface Device {
   next_maintenance_date: string
   last_maintenance_date: string
   created_at: string
+  maintenance_logs?: Array<{
+    id: string
+    notes: string
+    date_of_maintenance: string
+  }>
 }
 
 const Dashboard: React.FC = () => {
@@ -40,7 +45,7 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     fetchDevices()
-  }, [])
+  }, [userProfile?.hospital_id])
 
   const fetchDevices = async () => {
     try {
@@ -48,14 +53,71 @@ const Dashboard: React.FC = () => {
 
       const { data, error } = await supabase
         .from('devices')
-        .select('*')
+        .select(`
+          *,
+          maintenance_logs (
+            id,
+            notes,
+            date_of_maintenance
+          )
+        `)
         .eq('hospital_id', userProfile.hospital_id)
         .order('created_at', { ascending: false })
 
       if (error) throw error
 
-      // Update device statuses based on maintenance dates
+      // Get AI predictions for EEG devices
+      const eegDevices = data.filter(device => device.device_type === 'EEG Machine')
+      let aiPredictions = {}
+      
+      if (eegDevices.length > 0) {
+        const deviceIds = eegDevices.map(d => d.id)
+        const { data: predictions } = await supabase
+          .from('eeg_predictions')
+          .select('device_id, predicted_condition, confidence_score, prediction_date')
+          .in('device_id', deviceIds)
+          .order('prediction_date', { ascending: false })
+        
+        // Group predictions by device_id and get the latest for each device
+        predictions?.forEach(prediction => {
+          if (!aiPredictions[prediction.device_id]) {
+            aiPredictions[prediction.device_id] = prediction
+          }
+        })
+      }
+
+      // Update device statuses based on maintenance dates and AI predictions
       const updatedDevices = data.map(device => {
+        // For EEG machines, check if we have AI prediction data
+        if (device.device_type === 'EEG Machine' && aiPredictions[device.id]) {
+          const prediction = aiPredictions[device.id]
+          const aiCondition = prediction.predicted_condition
+          let aiStatus: 'OK' | 'Warning' | 'Danger' = 'OK'
+          
+          switch (aiCondition) {
+            case 'Normal':
+              aiStatus = 'OK'
+              break
+            case 'Warning':
+              aiStatus = 'Warning'
+              break
+            case 'Critical':
+              aiStatus = 'Danger'
+              break
+            default:
+              aiStatus = 'OK'
+          }
+          
+          return { 
+            ...device, 
+            status: aiStatus,
+            aiCondition: aiCondition,
+            hasAIData: true,
+            aiConfidence: prediction.confidence_score
+          }
+        }
+        
+        // For non-EEG devices or EEG devices without AI data, use maintenance-based status
         const nextMaintenance = new Date(device.next_maintenance_date)
         const now = new Date()
         const warningThreshold = addDays(now, 7) // 7 days warning
@@ -119,6 +181,18 @@ const Dashboard: React.FC = () => {
     }
   }
 
+  const getLatestAIPrediction = (device: Device) => {
+    if (device.device_type !== 'EEG Machine' || !device.hasAIData) return null
+    
+    return {
+      condition: device.aiCondition,
+      failure: 'No', // We can add this if needed
+      timeToFailure: null, // We can add this if needed
+      date: new Date().toISOString(),
+      confidence: device.aiConfidence
+    }
+  }
+
   const filteredAndSortedDevices = devices
     .filter(device => 
       (statusFilter === 'all' || device.status === statusFilter) &&
@@ -145,6 +219,12 @@ const Dashboard: React.FC = () => {
     warning: devices.filter(d => d.status === 'Warning').length,
     danger: devices.filter(d => d.status === 'Danger').length
   }
+
+  // Count EEG devices with AI analysis
+  const eegDevicesWithAI = devices.filter(d => 
+    d.device_type === 'EEG Machine' && 
+    d.maintenance_logs?.some(log => log.notes.includes('EEG Maintenance Log'))
+  ).length
 
   if (loading) {
     return (
@@ -187,6 +267,11 @@ const Dashboard: React.FC = () => {
             <div>
               <p className="text-sm font-medium text-gray-600">Total Devices</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">{statusCounts.total}</p>
+              {eegDevicesWithAI > 0 && (
+                <p className="text-xs text-purple-600 mt-1">
+                  {eegDevicesWithAI} with AI analysis
+                </p>
+              )}
             </div>
             <TrendingUp className="w-8 h-8 text-blue-500" />
           </div>
@@ -290,6 +375,7 @@ const Dashboard: React.FC = () => {
             const StatusIcon = getStatusIcon(device.status)
             const nextMaintenance = new Date(device.next_maintenance_date)
             const lastMaintenance = new Date(device.last_maintenance_date)
+            const aiPrediction = getLatestAIPrediction(device)
 
             return (
               <div key={device.id} className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
@@ -357,7 +443,9 @@ const Dashboard: React.FC = () => {
                 <div className="px-6 pb-4">
                   <div className="bg-gray-50 rounded-lg p-3">
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium text-gray-700">Failure Risk Assessment:</span>
+                      <span className="font-medium text-gray-700">
+                        {device.device_type === 'EEG Machine' && aiPrediction ? 'AI Risk Assessment:' : 'Failure Risk Assessment:'}
+                      </span>
                       <span className={`font-semibold ${
                         device.status === 'OK' ? 'text-green-600' : 
                         device.status === 'Warning' ? 'text-yellow-600' : 'text-red-600'
@@ -374,7 +462,55 @@ const Dashboard: React.FC = () => {
                         }`}
                       ></div>
                     </div>
+                    {device.device_type === 'EEG Machine' && aiPrediction && (
+                      <div className="mt-2 text-xs text-gray-600">
+                        Based on AI analysis: {aiPrediction.condition} condition
+                      </div>
+                    )}
                   </div>
+                  
+                  {/* AI Prediction Display for EEG Machines */}
+                  {device.device_type === 'EEG Machine' && aiPrediction && (
+                    <div className="mt-3 bg-purple-50 rounded-lg p-3 border border-purple-200">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <Brain className="w-4 h-4 text-purple-600" />
+                        <span className="font-medium text-purple-800 text-sm">Latest AI Analysis</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <span className="text-gray-600">Condition:</span>
+                          <span className={`ml-1 font-medium ${
+                            aiPrediction.condition === 'Good' ? 'text-green-600' :
+                            aiPrediction.condition === 'Average' ? 'text-blue-600' :
+                            aiPrediction.condition === 'Warning' ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {aiPrediction.condition}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">TTF:</span>
+                          <span className="ml-1 font-medium text-blue-600">
+                            {aiPrediction.timeToFailure} days
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Failure:</span>
+                          <span className={`ml-1 font-medium ${
+                            aiPrediction.failure === 'No' ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {aiPrediction.failure}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Date:</span>
+                          <span className="ml-1 font-medium text-gray-700">
+                            {format(new Date(aiPrediction.date), 'MMM dd')}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )

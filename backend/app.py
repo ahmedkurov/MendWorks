@@ -6,10 +6,25 @@ import torch
 import torch.nn as nn
 import joblib
 import os
+import json
 from pathlib import Path
+from supabase import create_client, Client
+from dotenv import load_dotenv
+
+# Load environment variables from .env file (in project root)
+load_dotenv(dotenv_path=Path(__file__).parent.parent / '.env')
 
 app = Flask(__name__)
 CORS(app)
+
+# -----------------------
+# SUPABASE CONFIGURATION
+# -----------------------
+SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://placeholder.supabase.co')
+SUPABASE_KEY = os.getenv('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NDUxOTI4MDAsImV4cCI6MTk2MDc2ODgwMH0.placeholder')
+
+# Initialize Supabase client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # -----------------------
 # LSTM MODEL (Same as training)
@@ -158,6 +173,71 @@ def predict():
         return jsonify(result)
         
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/save-prediction', methods=['POST'])
+def save_prediction():
+    try:
+        data = request.get_json()
+        
+        # Validate required fields for new eeg_predictions table
+        required_fields = [
+            "device_id", "maintenance_log_id", "uploaded_by",
+            "temperature", "voltage", "current", "vibration", "pressure", "humidity", "usage_hours",
+            "predicted_condition", "predicted_failure", "predicted_cause", "recommended_solution",
+            "time_to_failure_days", "confidence_score", "class_probabilities"
+        ]
+        
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing field: {field}'}), 400
+        
+        # Parse class probabilities from string to JSON
+        if isinstance(data["class_probabilities"], str):
+            # Convert string format to JSON
+            prob_lines = data["class_probabilities"].strip().split('\n')
+            probabilities = {}
+            for line in prob_lines:
+                if ':' in line:
+                    class_name, percentage = line.split(':')
+                    probabilities[class_name.strip()] = float(percentage.strip().replace('%', ''))
+            data["class_probabilities"] = probabilities
+        
+        # Prepare data for database insertion (new table structure)
+        prediction_data = {
+            "device_id": data["device_id"],
+            "maintenance_log_id": data["maintenance_log_id"],
+            "uploaded_by": data["uploaded_by"],
+            "temperature": float(data["temperature"]),
+            "voltage": float(data["voltage"]),
+            "current": float(data["current"]),
+            "vibration": float(data["vibration"]),
+            "pressure": float(data["pressure"]),
+            "humidity": float(data["humidity"]),
+            "usage_hours": float(data["usage_hours"]),
+            "predicted_condition": data["predicted_condition"],
+            "predicted_failure": data["predicted_failure"],
+            "predicted_cause": data["predicted_cause"],
+            "recommended_solution": data["recommended_solution"],
+            "time_to_failure_days": float(data["time_to_failure_days"]),
+            "confidence_score": float(data["confidence_score"]),
+            "class_probabilities": data["class_probabilities"]
+        }
+        
+        # Insert into eeg_predictions table
+        result = supabase.table('eeg_predictions').insert(prediction_data).execute()
+        
+        if result.data:
+            return jsonify({
+                'success': True,
+                'message': 'EEG prediction saved successfully',
+                'prediction_id': result.data[0]['id']
+            })
+        else:
+            return jsonify({'error': 'Failed to save prediction to database'}), 500
+        
+    except Exception as e:
+        print(f"Error saving prediction: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

@@ -32,8 +32,9 @@ interface EEGPrediction {
   failure: string
   cause: string
   solution: string
-  timeToFailure: number
+  time_to_failure: number
   probabilities: string
+  confidence: number
 }
 
 const EEGMaintenanceLog: React.FC = () => {
@@ -136,6 +137,7 @@ const EEGMaintenanceLog: React.FC = () => {
     let cause = 'None'
     let solution = 'Continue routine maintenance'
     let timeToFailure = 365
+    let confidence = 85.0
 
     if (reading.temperature > 65 || reading.voltage < 190 || reading.voltage > 240) {
       condition = 'Critical'
@@ -143,15 +145,18 @@ const EEGMaintenanceLog: React.FC = () => {
       cause = reading.temperature > 65 ? 'Overheating' : 'Voltage Surge'
       solution = reading.temperature > 65 ? 'Check cooling system' : 'Stabilize power supply'
       timeToFailure = 5
+      confidence = 95.0
     } else if (reading.vibration > 3 || reading.usageHours > 8000) {
       condition = 'Warning'
       failure = 'Yes'
       cause = reading.vibration > 3 ? 'Mechanical Wear' : 'Wear & Tear'
       solution = reading.vibration > 3 ? 'Inspect moving parts' : 'Replace worn components'
       timeToFailure = 30
+      confidence = 80.0
     } else if (reading.usageHours > 5000) {
       condition = 'Average'
       timeToFailure = 180
+      confidence = 75.0
     }
 
     return {
@@ -159,8 +164,9 @@ const EEGMaintenanceLog: React.FC = () => {
       failure,
       cause,
       solution,
-      timeToFailure,
-      probabilities: `Good: 60%\nAverage: 25%\nWarning: 10%\nCritical: 5%`
+      time_to_failure: timeToFailure,
+      probabilities: `Good: 60%\nAverage: 25%\nWarning: 10%\nCritical: 5%`,
+      confidence
     }
   }
 
@@ -174,17 +180,89 @@ const EEGMaintenanceLog: React.FC = () => {
     setError('')
 
     try {
-      const { error: insertError } = await supabase
+      // First, save maintenance log
+      const { data: maintenanceLog, error: insertError } = await supabase
         .from('maintenance_logs')
         .insert({
           device_id: deviceId,
           uploaded_by: user!.id,
           date_of_maintenance: new Date().toISOString(),
-          notes: `EEG Maintenance Log - Condition: ${prediction.condition}, Failure: ${prediction.failure}, TTF: ${prediction.timeToFailure} days. ${notes}`,
+          notes: `EEG Maintenance Log - Condition: ${prediction.condition}, Failure: ${prediction.failure}, TTF: ${prediction.time_to_failure} days. ${notes}`,
           log_file_url: null
         })
+        .select()
 
       if (insertError) throw insertError
+
+      // Get the maintenance log ID
+      const maintenanceLogId = maintenanceLog[0].id
+
+      // Save detailed prediction to backend API
+      const predictionData = {
+        device_id: deviceId,
+        maintenance_log_id: maintenanceLogId,
+        uploaded_by: user!.id,
+        temperature: sensorReading.temperature,
+        voltage: sensorReading.voltage,
+        current: sensorReading.current,
+        vibration: sensorReading.vibration,
+        pressure: sensorReading.pressure,
+        humidity: sensorReading.humidity,
+        usage_hours: sensorReading.usageHours,
+        predicted_condition: prediction.condition,
+        predicted_failure: prediction.failure,
+        predicted_cause: prediction.cause,
+        recommended_solution: prediction.solution,
+        time_to_failure_days: prediction.time_to_failure,
+        confidence_score: prediction.confidence,
+        class_probabilities: prediction.probabilities
+      }
+
+      // Save prediction directly to Supabase using authenticated user context
+      const { data: predictionResult, error: predictionError } = await supabase
+        .from('eeg_predictions')
+        .insert({
+          device_id: deviceId,
+          maintenance_log_id: maintenanceLogId,
+          uploaded_by: user?.id,
+          temperature: sensorReading.temperature,
+          voltage: sensorReading.voltage,
+          current: sensorReading.current,
+          vibration: sensorReading.vibration,
+          pressure: sensorReading.pressure,
+          humidity: sensorReading.humidity,
+          usage_hours: sensorReading.usageHours,
+          predicted_condition: prediction.condition,
+          predicted_failure: prediction.failure,
+          predicted_cause: prediction.cause,
+          recommended_solution: prediction.solution,
+          time_to_failure_days: prediction.time_to_failure,
+          confidence_score: prediction.confidence,
+          class_probabilities: prediction.probabilities
+        })
+        .select()
+
+      if (predictionError) {
+        console.error('Error saving prediction:', predictionError)
+        throw new Error(`Failed to save prediction: ${predictionError.message}`)
+      }
+
+      console.log('Prediction saved successfully:', predictionResult)
+
+      // Update device status based on AI prediction
+      const deviceStatus = getDeviceStatusFromPrediction(prediction.condition)
+      const nextMaintenanceDate = calculateNextMaintenanceDate(prediction.time_to_failure)
+
+      const { error: updateError } = await supabase
+        .from('devices')
+        .update({
+          status: deviceStatus,
+          last_maintenance_date: new Date().toISOString(),
+          next_maintenance_date: nextMaintenanceDate.toISOString()
+        })
+        .eq('id', deviceId)
+
+      if (updateError) throw updateError
 
       navigate('/dashboard')
     } catch (error: any) {
@@ -192,6 +270,28 @@ const EEGMaintenanceLog: React.FC = () => {
     } finally {
       setLoading(false)
     }
+  }
+
+  const getDeviceStatusFromPrediction = (condition: string): 'OK' | 'Warning' | 'Danger' => {
+    switch (condition) {
+      case 'Good':
+        return 'OK'
+      case 'Average':
+        return 'OK'
+      case 'Warning':
+        return 'Warning'
+      case 'Critical':
+        return 'Danger'
+      default:
+        return 'OK'
+    }
+  }
+
+  const calculateNextMaintenanceDate = (timeToFailure: number): Date => {
+    const now = new Date()
+    // Schedule maintenance 30 days before predicted failure, or in 30 days if TTF > 60 days
+    const daysUntilMaintenance = Math.min(Math.max(timeToFailure - 30, 30), 90)
+    return new Date(now.getTime() + daysUntilMaintenance * 24 * 60 * 60 * 1000)
   }
 
   const getConditionColor = (condition: string) => {
@@ -425,7 +525,7 @@ const EEGMaintenanceLog: React.FC = () => {
                 <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                   <span className="font-medium text-gray-700">Time to Failure:</span>
                   <span className="font-semibold text-blue-600">
-                    {prediction.timeToFailure} days
+                    {prediction.time_to_failure} days
                   </span>
                 </div>
 
@@ -439,6 +539,14 @@ const EEGMaintenanceLog: React.FC = () => {
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <span className="font-medium text-gray-700 block mb-2">Recommended Solution:</span>
                   <span className="text-gray-900">{prediction.solution}</span>
+                </div>
+
+                {/* Confidence */}
+                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <span className="font-medium text-gray-700">Confidence:</span>
+                  <span className="font-semibold text-green-600">
+                    {prediction.confidence?.toFixed(1) || 'N/A'}%
+                  </span>
                 </div>
 
                 {/* Probabilities */}
