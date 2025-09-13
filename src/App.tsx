@@ -9,6 +9,7 @@ import DeviceSetup from './pages/DeviceSetup'
 import Dashboard from './pages/Dashboard'
 import AddDevice from './pages/AddDevice'
 import Settings from './pages/Settings'
+import EEGMaintenanceLog from './pages/EEGMaintenanceLog'
 
 function App() {
   return (
@@ -36,6 +37,13 @@ function App() {
             <Route path="add-device" element={<AddDevice />} />
             <Route path="settings" element={<Settings />} />
           </Route>
+
+          {/* EEG Maintenance Log Route */}
+          <Route path="/device/:deviceId/eeg-maintenance" element={
+            <ProtectedRoute>
+              <EEGMaintenanceLog />
+            </ProtectedRoute>
+          } />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/login" replace />} />

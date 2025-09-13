@@ -333,12 +333,22 @@ const Dashboard: React.FC = () => {
                       >
                         View Details
                       </Link>
-                      <Link
-                        to={`/device/${device.id}/maintenance`}
-                        className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors text-sm font-medium"
-                      >
-                        Add Log
-                      </Link>
+                      {device.device_type === 'EEG Machine' ? (
+                        <Link
+                          to={`/device/${device.id}/eeg-maintenance`}
+                          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium flex items-center space-x-1"
+                        >
+                          <Brain className="w-4 h-4" />
+                          <span>AI Analysis</span>
+                        </Link>
+                      ) : (
+                        <Link
+                          to={`/device/${device.id}/maintenance`}
+                          className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors text-sm font-medium"
+                        >
+                          Add Log
+                        </Link>
+                      )}
                     </div>
                   </div>
                 </div>
