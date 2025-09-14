@@ -10,6 +10,8 @@ import Dashboard from './pages/Dashboard'
 import AddDevice from './pages/AddDevice'
 import Settings from './pages/Settings'
 import EEGMaintenanceLog from './pages/EEGMaintenanceLog'
+import MRIMaintenanceLog from './pages/MRIMaintenanceLog'
+import VentilatorMaintenanceLog from './pages/VentilatorMaintenanceLog'
 
 function App() {
   return (
@@ -42,6 +44,20 @@ function App() {
           <Route path="/device/:deviceId/eeg-maintenance" element={
             <ProtectedRoute>
               <EEGMaintenanceLog />
+            </ProtectedRoute>
+          } />
+
+          {/* MRI Maintenance Log Route */}
+          <Route path="/device/:deviceId/mri-maintenance" element={
+            <ProtectedRoute>
+              <MRIMaintenanceLog />
+            </ProtectedRoute>
+          } />
+
+          {/* Ventilator Maintenance Log Route */}
+          <Route path="/device/:deviceId/ventilator-maintenance" element={
+            <ProtectedRoute>
+              <VentilatorMaintenanceLog />
             </ProtectedRoute>
           } />
 

@@ -15,7 +15,9 @@ import {
   Filter,
   Search,
   TrendingUp,
-  Calendar
+  Calendar,
+  Activity,
+  Trash2
 } from 'lucide-react'
 import { format, isAfter, isBefore, addDays } from 'date-fns'
 
@@ -37,11 +39,13 @@ interface Device {
 const Dashboard: React.FC = () => {
   const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'OK' | 'Warning' | 'Danger'>('all')
   const [sortBy, setSortBy] = useState<'status' | 'maintenance' | 'location'>('status')
 
-  const { userProfile } = useAuth()
+  const auth = useAuth()
+  const userProfile = auth.userProfile
 
   useEffect(() => {
     fetchDevices()
@@ -49,7 +53,16 @@ const Dashboard: React.FC = () => {
 
   const fetchDevices = async () => {
     try {
-      if (!userProfile?.hospital_id) return
+      setError(null)
+      setLoading(true)
+      
+      if (!userProfile?.hospital_id) {
+        console.log('No hospital_id found in userProfile:', userProfile)
+        setLoading(false)
+        return
+      }
+
+      console.log('Fetching devices for hospital_id:', userProfile.hospital_id)
 
       const { data, error } = await supabase
         .from('devices')
@@ -64,38 +77,81 @@ const Dashboard: React.FC = () => {
         .eq('hospital_id', userProfile.hospital_id)
         .order('created_at', { ascending: false })
 
-      if (error) throw error
+      if (error) {
+        console.error('Supabase error:', error)
+        setError(`Database error: ${error.message}`)
+        setLoading(false)
+        return
+      }
 
-      // Get AI predictions for EEG devices
+      console.log('Fetched devices:', data)
+
+      // Get AI predictions for all device types
       const eegDevices = data.filter(device => device.device_type === 'EEG Machine')
+      const mriDevices = data.filter(device => device.device_type === 'MRI Scanner')
+      const ventilatorDevices = data.filter(device => device.device_type === 'Ventilator')
+      
       let aiPredictions = {}
       
+      // Fetch EEG predictions
       if (eegDevices.length > 0) {
         const deviceIds = eegDevices.map(d => d.id)
         const { data: predictions } = await supabase
           .from('eeg_predictions')
-          .select('device_id, predicted_condition, confidence_score, prediction_date')
+          .select('device_id, predicted_condition, confidence_score, prediction_date, time_to_failure_days')
           .in('device_id', deviceIds)
           .order('prediction_date', { ascending: false })
         
-        // Group predictions by device_id and get the latest for each device
         predictions?.forEach(prediction => {
           if (!aiPredictions[prediction.device_id]) {
-            aiPredictions[prediction.device_id] = prediction
+            aiPredictions[prediction.device_id] = { ...prediction, type: 'eeg' }
+          }
+        })
+      }
+      
+      // Fetch MRI predictions
+      if (mriDevices.length > 0) {
+        const deviceIds = mriDevices.map(d => d.id)
+        const { data: predictions } = await supabase
+          .from('mri_predictions')
+          .select('device_id, predicted_condition, confidence_score, prediction_date, time_to_failure_days')
+          .in('device_id', deviceIds)
+          .order('prediction_date', { ascending: false })
+        
+        predictions?.forEach(prediction => {
+          if (!aiPredictions[prediction.device_id]) {
+            aiPredictions[prediction.device_id] = { ...prediction, type: 'mri' }
+          }
+        })
+      }
+      
+      // Fetch Ventilator predictions
+      if (ventilatorDevices.length > 0) {
+        const deviceIds = ventilatorDevices.map(d => d.id)
+        const { data: predictions } = await supabase
+          .from('ventilator_predictions')
+          .select('device_id, predicted_condition, confidence_score, prediction_date, time_to_failure_days')
+          .in('device_id', deviceIds)
+          .order('prediction_date', { ascending: false })
+        
+        predictions?.forEach(prediction => {
+          if (!aiPredictions[prediction.device_id]) {
+            aiPredictions[prediction.device_id] = { ...prediction, type: 'ventilator' }
           }
         })
       }
 
       // Update device statuses based on maintenance dates and AI predictions
       const updatedDevices = data.map(device => {
-        // For EEG machines, check if we have AI prediction data
-        if (device.device_type === 'EEG Machine' && aiPredictions[device.id]) {
+        // For all device types with AI predictions, update status based on prediction
+        if (aiPredictions[device.id]) {
           const prediction = aiPredictions[device.id]
           const aiCondition = prediction.predicted_condition
           let aiStatus: 'OK' | 'Warning' | 'Danger' = 'OK'
           
           switch (aiCondition) {
-            case 'Normal':
+            case 'Good':
+            case 'Average':
               aiStatus = 'OK'
               break
             case 'Warning':
@@ -118,16 +174,20 @@ const Dashboard: React.FC = () => {
         }
         
         // For non-EEG devices or EEG devices without AI data, use maintenance-based status
-        const nextMaintenance = new Date(device.next_maintenance_date)
-        const now = new Date()
-        const warningThreshold = addDays(now, 7) // 7 days warning
-        
         let status: 'OK' | 'Warning' | 'Danger' = 'OK'
         
-        if (isBefore(nextMaintenance, now)) {
-          status = 'Danger' // Overdue
-        } else if (isBefore(nextMaintenance, warningThreshold)) {
-          status = 'Warning' // Due soon
+        if (device.next_maintenance_date) {
+          const nextMaintenance = new Date(device.next_maintenance_date)
+          const now = new Date()
+          const warningThreshold = addDays(now, 7) // 7 days warning
+          
+          if (!isNaN(nextMaintenance.getTime())) {
+            if (isBefore(nextMaintenance, now)) {
+              status = 'Danger' // Overdue
+            } else if (isBefore(nextMaintenance, warningThreshold)) {
+              status = 'Warning' // Due soon
+            }
+          }
         }
 
         return { ...device, status }
@@ -136,6 +196,53 @@ const Dashboard: React.FC = () => {
       setDevices(updatedDevices)
     } catch (error) {
       console.error('Error fetching devices:', error)
+      setError(`Failed to load devices: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const deleteDevice = async (deviceId: string) => {
+    try {
+      if (!userProfile?.id) {
+        setError('User not authenticated')
+        return
+      }
+
+      // Confirm deletion
+      const confirmed = window.confirm(
+        'Are you sure you want to delete this device? This will permanently remove the device and all its related data (maintenance logs, AI predictions, etc.). This action cannot be undone.'
+      )
+      
+      if (!confirmed) return
+
+      setLoading(true)
+      setError(null)
+
+      // Call the backend API to delete the device
+      const response = await fetch('http://localhost:5000/api/delete-device', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          device_id: deviceId,
+          user_id: userProfile.id
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to delete device')
+      }
+
+      // Refresh the devices list
+      await fetchDevices()
+      
+      console.log('Device deleted successfully')
+    } catch (error) {
+      console.error('Error deleting device:', error)
+      setError(`Failed to delete device: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setLoading(false)
     }
@@ -182,14 +289,15 @@ const Dashboard: React.FC = () => {
   }
 
   const getLatestAIPrediction = (device: Device) => {
-    if (device.device_type !== 'EEG Machine' || !device.hasAIData) return null
+    // Check if device has AI data for any device type
+    if (!device.hasAIData) return null
     
     return {
-      condition: device.aiCondition,
-      failure: 'No', // We can add this if needed
-      timeToFailure: null, // We can add this if needed
-      date: new Date().toISOString(),
-      confidence: device.aiConfidence
+      predicted_condition: device.aiCondition,
+      predicted_failure: 'No', // We can add this if needed
+      time_to_failure_days: null, // We can add this if needed
+      prediction_date: new Date().toISOString(),
+      confidence_score: device.aiConfidence
     }
   }
 
@@ -220,11 +328,17 @@ const Dashboard: React.FC = () => {
     danger: devices.filter(d => d.status === 'Danger').length
   }
 
-  // Count EEG devices with AI analysis
-  const eegDevicesWithAI = devices.filter(d => 
-    d.device_type === 'EEG Machine' && 
-    d.maintenance_logs?.some(log => log.notes.includes('EEG Maintenance Log'))
+  // Count devices with AI analysis
+  const devicesWithAI = devices.filter(d => 
+    d.maintenance_logs?.some(log => 
+      log.notes.includes('EEG Maintenance Log') || 
+      log.notes.includes('MRI Maintenance Log') || 
+      log.notes.includes('Ventilator Maintenance Log')
+    )
   ).length
+
+  // Debug information
+  console.log('Dashboard render - loading:', loading, 'userProfile:', userProfile, 'devices:', devices)
 
   if (loading) {
     return (
@@ -236,6 +350,48 @@ const Dashboard: React.FC = () => {
               <div key={i} className="h-32 bg-gray-200 rounded-lg"></div>
             ))}
           </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Show debug info if no user profile
+  if (!userProfile) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <h2 className="text-lg font-semibold text-yellow-800 mb-2">Authentication Required</h2>
+          <p className="text-yellow-700 mb-4">
+            Please log in to view the dashboard. User profile: {JSON.stringify(userProfile)}
+          </p>
+          <Link
+            to="/login"
+            className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
+          >
+            Go to Login
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  // Add error boundary
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h2 className="text-lg font-semibold text-red-800 mb-2">Error Loading Dashboard</h2>
+          <p className="text-red-700 mb-4">{error}</p>
+          <button
+            onClick={() => {
+              setError(null)
+              setLoading(true)
+              fetchDevices()
+            }}
+            className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+          >
+            Try Again
+          </button>
         </div>
       </div>
     )
@@ -267,9 +423,9 @@ const Dashboard: React.FC = () => {
             <div>
               <p className="text-sm font-medium text-gray-600">Total Devices</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">{statusCounts.total}</p>
-              {eegDevicesWithAI > 0 && (
-                <p className="text-xs text-purple-600 mt-1">
-                  {eegDevicesWithAI} with AI analysis
+              {devicesWithAI > 0 && (
+                <p className="text-xs text-blue-600 mt-1">
+                  {devicesWithAI} with AI analysis
                 </p>
               )}
             </div>
@@ -373,8 +529,8 @@ const Dashboard: React.FC = () => {
           {filteredAndSortedDevices.map((device) => {
             const DeviceIcon = getDeviceIcon(device.device_type)
             const StatusIcon = getStatusIcon(device.status)
-            const nextMaintenance = new Date(device.next_maintenance_date)
-            const lastMaintenance = new Date(device.last_maintenance_date)
+            const nextMaintenance = device.next_maintenance_date ? new Date(device.next_maintenance_date) : null
+            const lastMaintenance = device.last_maintenance_date ? new Date(device.last_maintenance_date) : null
             const aiPrediction = getLatestAIPrediction(device)
 
             return (
@@ -403,10 +559,10 @@ const Dashboard: React.FC = () => {
                         <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-6 text-sm text-gray-600">
                           <div className="flex items-center">
                             <Calendar className="w-4 h-4 mr-1" />
-                            <span>Next: {format(nextMaintenance, 'MMM dd, yyyy')}</span>
+                            <span>Next: {nextMaintenance && !isNaN(nextMaintenance.getTime()) ? format(nextMaintenance, 'MMM dd, yyyy') : 'Not set'}</span>
                           </div>
                           <div className="flex items-center mt-1 sm:mt-0">
-                            <span>Last: {format(lastMaintenance, 'MMM dd, yyyy')}</span>
+                            <span>Last: {lastMaintenance && !isNaN(lastMaintenance.getTime()) ? format(lastMaintenance, 'MMM dd, yyyy') : 'Not set'}</span>
                           </div>
                         </div>
                       </div>
@@ -427,6 +583,22 @@ const Dashboard: React.FC = () => {
                           <Brain className="w-4 h-4" />
                           <span>AI Analysis</span>
                         </Link>
+                      ) : device.device_type === 'MRI Scanner' ? (
+                        <Link
+                          to={`/device/${device.id}/mri-maintenance`}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center space-x-1"
+                        >
+                          <Monitor className="w-4 h-4" />
+                          <span>AI Analysis</span>
+                        </Link>
+                      ) : device.device_type === 'Ventilator' ? (
+                        <Link
+                          to={`/device/${device.id}/ventilator-maintenance`}
+                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center space-x-1"
+                        >
+                          <Wind className="w-4 h-4" />
+                          <span>AI Analysis</span>
+                        </Link>
                       ) : (
                         <Link
                           to={`/device/${device.id}/maintenance`}
@@ -435,6 +607,14 @@ const Dashboard: React.FC = () => {
                           Add Log
                         </Link>
                       )}
+                      <button
+                        onClick={() => deleteDevice(device.id)}
+                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium flex items-center space-x-1"
+                        title="Delete Device"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>Delete</span>
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -462,50 +642,65 @@ const Dashboard: React.FC = () => {
                         }`}
                       ></div>
                     </div>
-                    {device.device_type === 'EEG Machine' && aiPrediction && (
+                    {aiPrediction && (
                       <div className="mt-2 text-xs text-gray-600">
-                        Based on AI analysis: {aiPrediction.condition} condition
+                        Based on AI analysis: {aiPrediction.predicted_condition} condition
                       </div>
                     )}
                   </div>
                   
-                  {/* AI Prediction Display for EEG Machines */}
-                  {device.device_type === 'EEG Machine' && aiPrediction && (
-                    <div className="mt-3 bg-purple-50 rounded-lg p-3 border border-purple-200">
+                  {/* AI Prediction Display for all device types */}
+                  {aiPrediction && (
+                    <div className={`mt-3 rounded-lg p-3 border ${
+                      device.device_type === 'EEG Machine' ? 'bg-purple-50 border-purple-200' :
+                      device.device_type === 'MRI Scanner' ? 'bg-blue-50 border-blue-200' :
+                      device.device_type === 'Ventilator' ? 'bg-green-50 border-green-200' :
+                      'bg-gray-50 border-gray-200'
+                    }`}>
                       <div className="flex items-center space-x-2 mb-2">
-                        <Brain className="w-4 h-4 text-purple-600" />
-                        <span className="font-medium text-purple-800 text-sm">Latest AI Analysis</span>
+                        {device.device_type === 'EEG Machine' ? <Brain className="w-4 h-4 text-purple-600" /> :
+                         device.device_type === 'MRI Scanner' ? <Monitor className="w-4 h-4 text-blue-600" /> :
+                         device.device_type === 'Ventilator' ? <Wind className="w-4 h-4 text-green-600" /> :
+                         <Activity className="w-4 h-4 text-gray-600" />}
+                        <span className={`font-medium text-sm ${
+                          device.device_type === 'EEG Machine' ? 'text-purple-800' :
+                          device.device_type === 'MRI Scanner' ? 'text-blue-800' :
+                          device.device_type === 'Ventilator' ? 'text-green-800' :
+                          'text-gray-800'
+                        }`}>
+                          Latest AI Analysis
+                        </span>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         <div>
                           <span className="text-gray-600">Condition:</span>
                           <span className={`ml-1 font-medium ${
-                            aiPrediction.condition === 'Good' ? 'text-green-600' :
-                            aiPrediction.condition === 'Average' ? 'text-blue-600' :
-                            aiPrediction.condition === 'Warning' ? 'text-yellow-600' :
+                            aiPrediction.predicted_condition === 'Good' ? 'text-green-600' :
+                            aiPrediction.predicted_condition === 'Average' ? 'text-blue-600' :
+                            aiPrediction.predicted_condition === 'Warning' ? 'text-yellow-600' :
                             'text-red-600'
                           }`}>
-                            {aiPrediction.condition}
+                            {aiPrediction.predicted_condition}
                           </span>
                         </div>
                         <div>
                           <span className="text-gray-600">TTF:</span>
                           <span className="ml-1 font-medium text-blue-600">
-                            {aiPrediction.timeToFailure} days
+                            {aiPrediction.time_to_failure_days} days
                           </span>
                         </div>
                         <div>
-                          <span className="text-gray-600">Failure:</span>
-                          <span className={`ml-1 font-medium ${
-                            aiPrediction.failure === 'No' ? 'text-green-600' : 'text-red-600'
-                          }`}>
-                            {aiPrediction.failure}
+                          <span className="text-gray-600">Confidence:</span>
+                          <span className="ml-1 font-medium text-green-600">
+                            {aiPrediction.confidence_score?.toFixed(1)}%
                           </span>
                         </div>
                         <div>
                           <span className="text-gray-600">Date:</span>
                           <span className="ml-1 font-medium text-gray-700">
-                            {format(new Date(aiPrediction.date), 'MMM dd')}
+                            {aiPrediction.prediction_date && !isNaN(new Date(aiPrediction.prediction_date).getTime()) 
+                              ? format(new Date(aiPrediction.prediction_date), 'MMM dd') 
+                              : 'N/A'}
                           </span>
                         </div>
                       </div>
