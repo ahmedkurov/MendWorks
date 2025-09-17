@@ -13,6 +13,7 @@ interface AuthContextType {
   user: User | null
   session: Session | null
   loading: boolean
+  profileLoading: boolean
   signUp: (email: string, password: string, userData: any) => Promise<any>
   signIn: (email: string, password: string) => Promise<any>
   signOut: () => Promise<void>
@@ -34,12 +35,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
   const [userProfile, setUserProfile] = useState<any>(null)
 
   const refreshUserProfile = async () => {
     if (!user) return
 
+    setProfileLoading(true)
     try {
+      console.log('Fetching user profile for user:', user.id)
+      const startTime = Date.now()
+      
       const { data, error } = await supabase
         .from('users')
         .select(`
@@ -49,29 +55,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('id', user.id)
         .maybeSingle()
 
-      if (error) throw error
+      const endTime = Date.now()
+      console.log(`Profile fetch took ${endTime - startTime}ms`)
+
+      if (error) {
+        console.error('Profile fetch error:', error)
+        throw error
+      }
+      
+      console.log('Profile data received:', data)
       setUserProfile(data)
     } catch (error) {
       console.error('Error fetching user profile:', error)
+      // Set a fallback profile to prevent infinite loading
+      setUserProfile(null)
+    } finally {
+      setProfileLoading(false)
     }
   }
 
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout
+    
+    // Set a timeout to prevent infinite loading
+    timeoutId = setTimeout(() => {
+      console.warn('Auth loading timeout - setting loading to false')
+      setLoading(false)
+    }, 10000) // 10 second timeout
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      clearTimeout(timeoutId)
       setSession(session)
       setUser(session?.user ?? null)
+      setLoading(false)
+    }).catch((error) => {
+      console.error('Error getting session:', error)
+      clearTimeout(timeoutId)
       setLoading(false)
     })
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      clearTimeout(timeoutId)
       setSession(session)
       setUser(session?.user ?? null)
       setLoading(false)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      clearTimeout(timeoutId)
+      subscription.unsubscribe()
+    }
   }, [])
 
   useEffect(() => {
@@ -155,6 +190,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     user,
     session,
     loading,
+    profileLoading,
     signUp,
     signIn,
     signOut,

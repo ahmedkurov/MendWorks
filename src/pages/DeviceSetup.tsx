@@ -12,12 +12,6 @@ const deviceTypes = [
     color: 'from-blue-400 to-blue-600'
   },
   {
-    type: 'CT Scanner',
-    icon: Monitor,
-    description: 'Computed Tomography Scanner',
-    color: 'from-teal-400 to-teal-600'
-  },
-  {
     type: 'Ventilator',
     icon: Wind,
     description: 'Medical Ventilation Equipment',
@@ -72,6 +66,11 @@ const DeviceSetup: React.FC = () => {
       return
     }
 
+    if (!userProfile || !userProfile.hospital_id) {
+      setError('User profile not loaded. Please try again.')
+      return
+    }
+
     setLoading(true)
     setError('')
 
@@ -98,6 +97,28 @@ const DeviceSetup: React.FC = () => {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Show loading state while user profile is loading
+  if (!userProfile) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-teal-50 to-blue-50 flex items-center justify-center p-4">
+        <div className="max-w-4xl w-full">
+          <div className="bg-white rounded-2xl shadow-xl p-8">
+            <div className="text-center">
+              <div className="mx-auto w-16 h-16 bg-teal-100 rounded-xl flex items-center justify-center mb-4">
+                <Activity className="w-8 h-8 text-teal-600" />
+              </div>
+              <h1 className="text-2xl font-bold text-gray-900">Device Setup</h1>
+              <p className="text-gray-600 mt-2">Loading your profile...</p>
+              <div className="mt-4 flex justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

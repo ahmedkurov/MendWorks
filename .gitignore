@@ -114,8 +114,6 @@ apply_*.py
 
 # Large data files
 *.csv
-*.pkl
-*.pth
 *.dll
 *.lib
 

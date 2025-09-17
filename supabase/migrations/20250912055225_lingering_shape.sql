@@ -21,7 +21,7 @@
 CREATE TABLE IF NOT EXISTS devices (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   hospital_id uuid REFERENCES hospitals(id) ON DELETE CASCADE,
-  device_type text NOT NULL CHECK (device_type IN ('MRI Scanner', 'CT Scanner', 'Ventilator')),
+  device_type text NOT NULL CHECK (device_type IN ('MRI Scanner', 'Ventilator')),
   location text NOT NULL,
   status text DEFAULT 'OK' CHECK (status IN ('OK', 'Warning', 'Danger')),
   next_maintenance_date timestamptz DEFAULT (now() + interval '30 days'),

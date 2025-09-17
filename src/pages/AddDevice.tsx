@@ -12,12 +12,6 @@ const deviceTypes = [
     color: 'from-blue-400 to-blue-600'
   },
   {
-    type: 'CT Scanner',
-    icon: Monitor,
-    description: 'Computed Tomography Scanner',
-    color: 'from-teal-400 to-teal-600'
-  },
-  {
     type: 'Ventilator',
     icon: Wind,
     description: 'Medical Ventilation Equipment',

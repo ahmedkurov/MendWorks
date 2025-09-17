@@ -17,13 +17,16 @@ import {
   TrendingUp,
   Calendar,
   Activity,
-  Trash2
+  Trash2,
+  Bot,
+  X,
+  AlertCircle
 } from 'lucide-react'
 import { format, isAfter, isBefore, addDays } from 'date-fns'
 
 interface Device {
   id: string
-  device_type: 'MRI Scanner' | 'CT Scanner' | 'Ventilator' | 'EEG Machine'
+  device_type: 'MRI Scanner' | 'Ventilator' | 'EEG Machine'
   location: string
   status: 'OK' | 'Warning' | 'Danger'
   next_maintenance_date: string
@@ -43,9 +46,12 @@ const Dashboard: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'OK' | 'Warning' | 'Danger'>('all')
   const [sortBy, setSortBy] = useState<'status' | 'maintenance' | 'location'>('status')
+  const [showCriticalAlert, setShowCriticalAlert] = useState(false)
+  const [criticalDevices, setCriticalDevices] = useState<Device[]>([])
 
   const auth = useAuth()
   const userProfile = auth.userProfile
+  const profileLoading = auth.profileLoading
 
   useEffect(() => {
     fetchDevices()
@@ -194,11 +200,22 @@ const Dashboard: React.FC = () => {
       })
 
       setDevices(updatedDevices)
+      
+      // Check for critical devices and show alert
+      checkCriticalDevices(updatedDevices)
     } catch (error) {
       console.error('Error fetching devices:', error)
       setError(`Failed to load devices: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const checkCriticalDevices = (devices: Device[]) => {
+    const critical = devices.filter(device => device.status === 'Danger')
+    if (critical.length > 0) {
+      setCriticalDevices(critical)
+      setShowCriticalAlert(true)
     }
   }
 
@@ -251,7 +268,6 @@ const Dashboard: React.FC = () => {
   const getDeviceIcon = (type: string) => {
     switch (type) {
       case 'MRI Scanner':
-      case 'CT Scanner':
         return Monitor
       case 'Ventilator':
         return Wind
@@ -355,6 +371,24 @@ const Dashboard: React.FC = () => {
     )
   }
 
+  // Show loading state if profile is still loading
+  if (profileLoading) {
+    return (
+      <div className="p-6">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <h2 className="text-lg font-semibold text-blue-800 mb-2">Loading Profile...</h2>
+          <p className="text-blue-700 mb-4">
+            Please wait while we load your profile information.
+          </p>
+          <div className="animate-pulse">
+            <div className="h-4 bg-blue-200 rounded w-1/4 mb-2"></div>
+            <div className="h-4 bg-blue-200 rounded w-1/2"></div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // Show debug info if no user profile
   if (!userProfile) {
     return (
@@ -399,6 +433,93 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Critical Device Alert */}
+      {showCriticalAlert && criticalDevices.length > 0 && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                    <AlertCircle className="w-6 h-6 text-red-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-red-800">Critical Device Alert</h2>
+                    <p className="text-red-600">Immediate attention required</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowCriticalAlert(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-red-800 mb-2">
+                    {criticalDevices.length} device{criticalDevices.length > 1 ? 's' : ''} require{criticalDevices.length === 1 ? 's' : ''} immediate attention
+                  </h3>
+                  <p className="text-red-700 text-sm">
+                    The following devices are in critical condition and may require immediate maintenance or replacement.
+                  </p>
+                </div>
+                
+                <div className="space-y-3">
+                  {criticalDevices.map((device) => (
+                    <div key={device.id} className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                            {device.device_type === 'EEG Machine' && <Brain className="w-5 h-5 text-red-600" />}
+                            {device.device_type === 'MRI Scanner' && <Monitor className="w-5 h-5 text-red-600" />}
+                            {device.device_type === 'Ventilator' && <Wind className="w-5 h-5 text-red-600" />}
+                          </div>
+                          <div>
+                            <h4 className="font-semibold text-gray-900">{device.device_type}</h4>
+                            <p className="text-sm text-gray-600">Location: {device.location}</p>
+                            {device.aiCondition && (
+                              <p className="text-sm text-red-600 font-medium">
+                                AI Status: {device.aiCondition} 
+                                {device.aiConfidence && ` (${Math.round(device.aiConfidence * 100)}% confidence)`}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            Critical
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button
+                    onClick={() => setShowCriticalAlert(false)}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowCriticalAlert(false)
+                      // You could add navigation to maintenance logs here
+                    }}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                  >
+                    View Maintenance Logs
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between">
         <div>
@@ -569,12 +690,6 @@ const Dashboard: React.FC = () => {
                     </div>
 
                     <div className="flex items-center space-x-3">
-                      <Link
-                        to={`/device/${device.id}`}
-                        className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
-                      >
-                        View Details
-                      </Link>
                       {device.device_type === 'EEG Machine' ? (
                         <Link
                           to={`/device/${device.id}/eeg-maintenance`}
@@ -607,14 +722,15 @@ const Dashboard: React.FC = () => {
                           Add Log
                         </Link>
                       )}
-                      <button
+                      {/* Temporarily disabled delete functionality */}
+                      {/* <button
                         onClick={() => deleteDevice(device.id)}
                         className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium flex items-center space-x-1"
                         title="Delete Device"
                       >
                         <Trash2 className="w-4 h-4" />
                         <span>Delete</span>
-                      </button>
+                      </button> */}
                     </div>
                   </div>
                 </div>

@@ -9,7 +9,8 @@ import {
   Plus,
   User,
   Menu,
-  X
+  X,
+  Bot
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -18,6 +19,7 @@ const Layout: React.FC = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [chatbotOpen, setChatbotOpen] = useState(false)
 
   const handleSignOut = async () => {
     try {
@@ -80,6 +82,18 @@ const Layout: React.FC = () => {
                 )
               })}
               
+              {/* AI Chatbot Button - Mobile */}
+              <button
+                onClick={() => {
+                  setChatbotOpen(true)
+                  setMobileMenuOpen(false)
+                }}
+                className="flex items-center space-x-3 px-3 py-3 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 w-full"
+              >
+                <Bot className="w-5 h-5" />
+                <span>AI Assistant</span>
+              </button>
+              
               <div className="border-t mt-4 pt-4">
                 <div className="flex items-center space-x-3 px-3 py-2 text-sm text-gray-600">
                   <User className="w-5 h-5" />
@@ -126,6 +140,15 @@ const Layout: React.FC = () => {
                 </Link>
               )
             })}
+            
+            {/* AI Chatbot Button */}
+            <button
+              onClick={() => setChatbotOpen(true)}
+              className="flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors w-full"
+            >
+              <Bot className="w-5 h-5" />
+              <span>AI Assistant</span>
+            </button>
           </nav>
 
           <div className="absolute bottom-0 w-64 p-4 border-t bg-white">
@@ -158,6 +181,101 @@ const Layout: React.FC = () => {
       <div className="md:hidden">
         <Outlet />
       </div>
+
+      {/* AI Chatbot Popup */}
+      {chatbotOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md h-[600px] flex flex-col">
+            {/* Chatbot Header */}
+            <div className="flex items-center justify-between p-4 border-b bg-teal-50 rounded-t-xl">
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 bg-teal-100 rounded-full flex items-center justify-center">
+                  <Bot className="w-5 h-5 text-teal-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">AI Assistant</h3>
+                  <p className="text-xs text-gray-600">Medical Device Support</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setChatbotOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Chat Messages */}
+            <div className="flex-1 p-4 overflow-y-auto space-y-4">
+              {/* Welcome Message */}
+              <div className="flex items-start space-x-3">
+                <div className="w-8 h-8 bg-teal-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Bot className="w-4 h-4 text-teal-600" />
+                </div>
+                <div className="bg-gray-100 rounded-lg p-3 max-w-xs">
+                  <p className="text-sm text-gray-800">
+                    Hello! I'm your AI assistant for medical device maintenance. How can I help you today?
+                  </p>
+                </div>
+              </div>
+
+              {/* Sample Messages */}
+              <div className="flex items-start space-x-3 justify-end">
+                <div className="bg-teal-600 text-white rounded-lg p-3 max-w-xs">
+                  <p className="text-sm">What devices need maintenance?</p>
+                </div>
+                <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0">
+                  <User className="w-4 h-4 text-gray-600" />
+                </div>
+              </div>
+
+              <div className="flex items-start space-x-3">
+                <div className="w-8 h-8 bg-teal-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Bot className="w-4 h-4 text-teal-600" />
+                </div>
+                <div className="bg-gray-100 rounded-lg p-3 max-w-xs">
+                  <p className="text-sm text-gray-800">
+                    I can help you check device status, schedule maintenance, and provide troubleshooting guidance. What would you like to know?
+                  </p>
+                </div>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="space-y-2">
+                <p className="text-xs text-gray-500 font-medium">Quick Actions:</p>
+                <div className="flex flex-wrap gap-2">
+                  <button className="px-3 py-1 bg-teal-100 text-teal-700 rounded-full text-xs hover:bg-teal-200 transition-colors">
+                    Check Device Status
+                  </button>
+                  <button className="px-3 py-1 bg-teal-100 text-teal-700 rounded-full text-xs hover:bg-teal-200 transition-colors">
+                    Schedule Maintenance
+                  </button>
+                  <button className="px-3 py-1 bg-teal-100 text-teal-700 rounded-full text-xs hover:bg-teal-200 transition-colors">
+                    Troubleshooting
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Chat Input */}
+            <div className="p-4 border-t">
+              <div className="flex space-x-2">
+                <input
+                  type="text"
+                  placeholder="Type your message..."
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
+                />
+                <button className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors">
+                  <Bot className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                AI Assistant is here to help with device maintenance and troubleshooting.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

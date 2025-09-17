@@ -61,7 +61,7 @@ export type Database = {
         Row: {
           id: string
           hospital_id: string
-          device_type: 'MRI Scanner' | 'CT Scanner' | 'Ventilator' | 'EEG Machine'
+          device_type: 'MRI Scanner' | 'Ventilator' | 'EEG Machine'
           location: string
           status: 'OK' | 'Warning' | 'Danger'
           next_maintenance_date: string
@@ -72,7 +72,7 @@ export type Database = {
         Insert: {
           id?: string
           hospital_id: string
-          device_type: 'MRI Scanner' | 'CT Scanner' | 'Ventilator' | 'EEG Machine'
+          device_type: 'MRI Scanner' | 'Ventilator' | 'EEG Machine'
           location: string
           status?: 'OK' | 'Warning' | 'Danger'
           next_maintenance_date?: string

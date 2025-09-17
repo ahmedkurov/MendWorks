@@ -39,7 +39,7 @@ DROP CONSTRAINT IF EXISTS devices_device_type_check;
 
 ALTER TABLE devices 
 ADD CONSTRAINT devices_device_type_check 
-CHECK (device_type IN ('MRI Scanner', 'CT Scanner', 'Ventilator', 'EEG Machine'));
+CHECK (device_type IN ('MRI Scanner', 'Ventilator', 'EEG Machine'));
 
 -- 3. Enable Row Level Security
 ALTER TABLE eeg_predictions ENABLE ROW LEVEL SECURITY;

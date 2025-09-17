@@ -111,7 +111,19 @@ const MRIMaintenanceLog: React.FC = () => {
         throw new Error(result.error)
       }
 
-      return result
+      // Map API response condition to database expected values
+      const conditionMapping: { [key: string]: string } = {
+        'Normal': 'Good',
+        'Good': 'Good',
+        'Average': 'Average', 
+        'Warning': 'Warning',
+        'Critical': 'Critical'
+      }
+
+      return {
+        ...result,
+        condition: conditionMapping[result.condition] || 'Good'
+      }
     } catch (error: any) {
       console.error('Prediction error:', error)
       // Fallback to simulation if API is not available
@@ -200,12 +212,18 @@ const MRIMaintenanceLog: React.FC = () => {
           recommended_solution: prediction.solution,
           time_to_failure_days: prediction.time_to_failure,
           confidence_score: prediction.confidence,
-          class_probabilities: prediction.probabilities
+          class_probabilities: parseProbabilitiesToJSON(prediction.probabilities)
         })
         .select()
 
       if (predictionError) {
         console.error('Error saving prediction:', predictionError)
+        console.error('Prediction data that failed:', {
+          device_id: deviceId,
+          maintenance_log_id: maintenanceLogId,
+          uploaded_by: user.id,
+          // ... other fields
+        })
         throw new Error(`Failed to save prediction: ${predictionError.message}`)
       }
 
@@ -228,12 +246,22 @@ const MRIMaintenanceLog: React.FC = () => {
         console.error('Error updating device status:', updateError)
       }
 
-      alert('MRI maintenance log and AI analysis saved successfully!')
       navigate('/dashboard')
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving MRI maintenance log:', error)
-      alert('Failed to save MRI maintenance log. Please try again.')
+      
+      let errorMessage = 'Failed to save MRI maintenance log. Please try again.'
+      
+      if (error.message?.includes('relation "mri_predictions" does not exist')) {
+        errorMessage = 'MRI predictions table not found. Please ensure the database migration has been applied.'
+      } else if (error.message?.includes('permission denied')) {
+        errorMessage = 'Permission denied. Please check your user permissions.'
+      } else if (error.message?.includes('foreign key')) {
+        errorMessage = 'Invalid device or maintenance log reference. Please try again.'
+      }
+      
+      alert(errorMessage)
     } finally {
       setIsSaving(false)
     }
@@ -242,6 +270,7 @@ const MRIMaintenanceLog: React.FC = () => {
   const getDeviceStatusFromPrediction = (condition: string): 'OK' | 'Warning' | 'Danger' => {
     switch (condition) {
       case 'Good': return 'OK'
+      case 'Normal': return 'OK'
       case 'Average': return 'OK'
       case 'Warning': return 'Warning'
       case 'Critical': return 'Danger'
@@ -253,6 +282,27 @@ const MRIMaintenanceLog: React.FC = () => {
     const nextMaintenance = new Date()
     nextMaintenance.setDate(nextMaintenance.getDate() + Math.min(timeToFailure, 90)) // Cap at 90 days
     return nextMaintenance
+  }
+
+  const parseProbabilitiesToJSON = (probabilitiesString: string) => {
+    try {
+      const lines = probabilitiesString.trim().split('\n')
+      const probabilities: { [key: string]: number } = {}
+      
+      for (const line of lines) {
+        if (line.includes(':')) {
+          const [className, percentage] = line.split(':')
+          const cleanClassName = className.trim()
+          const cleanPercentage = parseFloat(percentage.trim().replace('%', ''))
+          probabilities[cleanClassName] = cleanPercentage
+        }
+      }
+      
+      return probabilities
+    } catch (error) {
+      console.error('Error parsing probabilities:', error)
+      return { Good: 0, Average: 0, Warning: 0, Critical: 0 }
+    }
   }
 
   const sensorFields = [
@@ -359,12 +409,12 @@ const MRIMaintenanceLog: React.FC = () => {
                 {/* Condition Status */}
                 <div className="text-center">
                   <div className={`inline-flex items-center px-4 py-2 rounded-full text-lg font-semibold ${
-                    prediction.condition === 'Good' ? 'bg-green-100 text-green-800' :
+                    prediction.condition === 'Good' || prediction.condition === 'Normal' ? 'bg-green-100 text-green-800' :
                     prediction.condition === 'Average' ? 'bg-blue-100 text-blue-800' :
                     prediction.condition === 'Warning' ? 'bg-yellow-100 text-yellow-800' :
                     'bg-red-100 text-red-800'
                   }`}>
-                    {prediction.condition === 'Good' ? <CheckCircle className="w-5 h-5 mr-2" /> :
+                    {prediction.condition === 'Good' || prediction.condition === 'Normal' ? <CheckCircle className="w-5 h-5 mr-2" /> :
                      prediction.condition === 'Average' ? <CheckCircle className="w-5 h-5 mr-2" /> :
                      prediction.condition === 'Warning' ? <AlertTriangle className="w-5 h-5 mr-2" /> :
                      <AlertTriangle className="w-5 h-5 mr-2" />}

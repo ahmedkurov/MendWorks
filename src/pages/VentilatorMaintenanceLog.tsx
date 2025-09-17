@@ -261,7 +261,6 @@ const VentilatorMaintenanceLog: React.FC = () => {
         console.error('Error updating device status:', updateError)
       }
 
-      alert('Ventilator maintenance log and AI analysis saved successfully!')
       navigate('/dashboard')
       
     } catch (error) {
